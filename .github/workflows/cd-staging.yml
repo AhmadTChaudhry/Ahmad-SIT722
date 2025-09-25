@@ -78,6 +78,26 @@ jobs:
           NS="${{ steps.meta.outputs.NS }}"
           kubectl get ns "$NS" >/dev/null 2>&1 || kubectl create ns "$NS"
 
+      - name: Create ACR imagePullSecret in namespace
+        env:
+          REG: ${{ steps.meta.outputs.REG }}
+          NS: ${{ steps.meta.outputs.NS }}
+          SP_APP_ID: ${{ fromJson(secrets.AZURE_CREDENTIALS).clientId }}
+          SP_PASSWORD: ${{ fromJson(secrets.AZURE_CREDENTIALS).clientSecret }}
+        run: |
+          kubectl -n "$NS" create secret docker-registry acr-cred \
+            --docker-server="$REG" \
+            --docker-username="$SP_APP_ID" \
+            --docker-password="$SP_PASSWORD" \
+            --docker-email="devnull@example.com" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Patch default ServiceAccount to use imagePullSecret
+        env:
+          NS: ${{ steps.meta.outputs.NS }}
+        run: |
+          kubectl -n "$NS" patch serviceaccount default -p '{"imagePullSecrets":[{"name":"acr-cred"}]}' || true
+
       - name: Apply k8s manifests to staging
         working-directory: k8s
         run: |
