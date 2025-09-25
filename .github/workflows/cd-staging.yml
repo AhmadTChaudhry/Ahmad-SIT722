@@ -1,13 +1,14 @@
 name: CD to Staging (after CI on testing)
 on:
   workflow_run:
-    workflows: [ "CI (testing branch)" ]
+    workflows: [ "CI - Stage 1 (testing branch) - test then build & push images" ]
     types: [ "completed" ]
     branches: [ "testing" ]
 
 env:
   REGISTRY: ${{ secrets.ACR_LOGIN_SERVER }}
-  STAGING_NAMESPACE: ${{ vars.STAGING_NAMESPACE }}
+  # Ephemeral namespace per run (safe for concurrent runs)
+  STAGING_NAMESPACE: staging-${{ github.run_id }}-${{ github.run_attempt }}
 
 jobs:
   deploy-staging:
@@ -33,7 +34,7 @@ jobs:
 
       - name: Create staging namespace
         run: |
-          kubectl get ns $STAGING_NAMESPACE || kubectl create ns $STAGING_NAMESPACE
+          kubectl create ns $STAGING_NAMESPACE
 
       - name: Apply k8s manifests to staging
         working-directory: k8s
@@ -62,6 +63,24 @@ jobs:
           kubectl -n $STAGING_NAMESPACE rollout status deployment/product-service-w10-aks --timeout=180s
           kubectl -n $STAGING_NAMESPACE rollout status deployment/order-service-w10-aks --timeout=180s
           kubectl -n $STAGING_NAMESPACE rollout status deployment/customer-service-w10-aks --timeout=180s
+
+      - name: Acceptance checks (/health)
+        run: |
+          set -e
+          # Port-forward services and probe /health endpoints
+          kubectl -n $STAGING_NAMESPACE port-forward svc/product-service-w10-aks 18000:8000 >/dev/null 2>&1 &
+          PFPID1=$!
+          kubectl -n $STAGING_NAMESPACE port-forward svc/order-service-w10-aks 18001:8000 >/dev/null 2>&1 &
+          PFPID2=$!
+          kubectl -n $STAGING_NAMESPACE port-forward svc/customer-service-w10-aks 18002:8000 >/dev/null 2>&1 &
+          PFPID3=$!
+          # give port-forwards time to bind
+          sleep 5
+          curl -sf http://127.0.0.1:18000/health | cat
+          curl -sf http://127.0.0.1:18001/health | cat
+          curl -sf http://127.0.0.1:18002/health | cat
+          # cleanup port-forward background jobs
+          kill $PFPID1 $PFPID2 $PFPID3 || true
 
       - name: Basic smoke (pods up)
         run: |
