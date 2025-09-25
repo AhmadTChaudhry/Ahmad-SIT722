@@ -1,4 +1,4 @@
-name: CD to Production (main)
+name: CD - Stage 3 (Production)
 on:
   push:
     branches: [ "main" ]
