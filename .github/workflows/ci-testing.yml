@@ -1,4 +1,4 @@
-name: CI - Stage 1 (testing branch): test then build & push images
+name: CI - Stage 1 (testing branch) - test then build & push images
 on:
   push:
     branches: [ "testing" ]
