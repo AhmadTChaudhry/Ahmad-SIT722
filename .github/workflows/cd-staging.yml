@@ -4,15 +4,27 @@ on:
     workflows: [ "CI - Stage 1 (testing branch)" ]
     types: [ "completed" ]
     branches: [ "testing" ]
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "ACR image tag to deploy (default: testing-latest)"
+        required: false
+        type: string
+      namespace_suffix:
+        description: "Override namespace suffix (default: short SHA)"
+        required: false
+        type: string
 
 env:
   REGISTRY: ${{ secrets.ACR_LOGIN_SERVER }}
-  # Use repository variable for staging namespace (e.g., staging-w10)
-  STAGING_NAMESPACE: ${{ vars.STAGING_NAMESPACE }}
+
+concurrency:
+  group: staging-${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.run_id }}
+  cancel-in-progress: true
 
 jobs:
   deploy-staging:
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -20,6 +32,35 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Compute image TAG and Namespace
+        id: meta
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            SHA="${{ github.event.workflow_run.head_sha }}"
+          else
+            SHA="${{ github.sha }}"
+          fi
+          SHORT="${SHA:0:7}"
+
+          INPUT_TAG="${{ inputs.image_tag || '' }}"
+          if [ -n "$INPUT_TAG" ]; then
+            TAG="$INPUT_TAG"
+          else
+            TAG="testing-latest"
+          fi
+
+          NS_SUFFIX="${{ inputs.namespace_suffix || '' }}"
+          if [ -z "$NS_SUFFIX" ]; then
+            NS_SUFFIX="$SHORT"
+          fi
+          NS="staging-$NS_SUFFIX"
+
+          echo "TAG=$TAG"   >> "$GITHUB_OUTPUT"
+          echo "NS=$NS"     >> "$GITHUB_OUTPUT"
+          echo "REG=${{ env.REGISTRY }}" >> "$GITHUB_OUTPUT"
+          echo "Using REG=${{ env.REGISTRY }}, TAG=$TAG, NS=$NS"
 
       - name: Azure login
         uses: azure/login@v2
@@ -34,45 +75,52 @@ jobs:
 
       - name: Create staging namespace
         run: |
-          kubectl get ns $STAGING_NAMESPACE || kubectl create ns $STAGING_NAMESPACE
+          NS="${{ steps.meta.outputs.NS }}"
+          kubectl get ns "$NS" >/dev/null 2>&1 || kubectl create ns "$NS"
 
       - name: Apply k8s manifests to staging
         working-directory: k8s
         run: |
-          kubectl -n $STAGING_NAMESPACE apply -f configmaps.yaml
-          kubectl -n $STAGING_NAMESPACE apply -f secrets.yaml
-          kubectl -n $STAGING_NAMESPACE apply -f rabbitmq.yaml
-          kubectl -n $STAGING_NAMESPACE apply -f product-db.yaml
-          kubectl -n $STAGING_NAMESPACE apply -f order-db.yaml
-          kubectl -n $STAGING_NAMESPACE apply -f customer-db.yaml
-          kubectl -n $STAGING_NAMESPACE apply -f product-service.yaml
-          kubectl -n $STAGING_NAMESPACE apply -f order-service.yaml
-          kubectl -n $STAGING_NAMESPACE apply -f customer-service.yaml
+          NS="${{ steps.meta.outputs.NS }}"
+          kubectl -n "$NS" apply -f configmaps.yaml
+          kubectl -n "$NS" apply -f secrets.yaml || true
+          kubectl -n "$NS" apply -f rabbitmq.yaml
+          kubectl -n "$NS" apply -f product-db.yaml
+          kubectl -n "$NS" apply -f order-db.yaml
+          kubectl -n "$NS" apply -f customer-db.yaml
+          kubectl -n "$NS" apply -f product-service.yaml
+          kubectl -n "$NS" apply -f order-service.yaml
+          kubectl -n "$NS" apply -f customer-service.yaml
 
-      - name: Override images to use testing-latest
+      - name: Set images to computed tag
         run: |
-          kubectl -n $STAGING_NAMESPACE set image deployment/product-service-w10-aks \
-            product-service-container=$REGISTRY/product_service:testing-latest
-          kubectl -n $STAGING_NAMESPACE set image deployment/order-service-w10-aks \
-            order-service-container=$REGISTRY/order_service:testing-latest
-          kubectl -n $STAGING_NAMESPACE set image deployment/customer-service-w10-aks \
-            customer-service-container=$REGISTRY/customer_service:testing-latest
+          NS="${{ steps.meta.outputs.NS }}"
+          REG="${{ steps.meta.outputs.REG }}"
+          TAG="${{ steps.meta.outputs.TAG }}"
+          kubectl -n "$NS" set image deployment/product-service-w10-aks \
+            product-service-container="$REG/product_service:$TAG"
+          kubectl -n "$NS" set image deployment/order-service-w10-aks \
+            order-service-container="$REG/order_service:$TAG"
+          kubectl -n "$NS" set image deployment/customer-service-w10-aks \
+            customer-service-container="$REG/customer_service:$TAG"
 
       - name: Wait for rollouts
         run: |
-          kubectl -n $STAGING_NAMESPACE rollout status deployment/product-service-w10-aks --timeout=180s
-          kubectl -n $STAGING_NAMESPACE rollout status deployment/order-service-w10-aks --timeout=180s
-          kubectl -n $STAGING_NAMESPACE rollout status deployment/customer-service-w10-aks --timeout=180s
+          NS="${{ steps.meta.outputs.NS }}"
+          kubectl -n "$NS" rollout status deployment/product-service-w10-aks --timeout=300s
+          kubectl -n "$NS" rollout status deployment/order-service-w10-aks --timeout=300s
+          kubectl -n "$NS" rollout status deployment/customer-service-w10-aks --timeout=300s
 
       - name: Acceptance checks (/health)
         run: |
           set -e
+          NS="${{ steps.meta.outputs.NS }}"
           # Port-forward services and probe /health endpoints
-          kubectl -n $STAGING_NAMESPACE port-forward svc/product-service-w10-aks 18000:8000 >/dev/null 2>&1 &
+          kubectl -n "$NS" port-forward svc/product-service-w10-aks 18000:8000 >/dev/null 2>&1 &
           PFPID1=$!
-          kubectl -n $STAGING_NAMESPACE port-forward svc/order-service-w10-aks 18001:8000 >/dev/null 2>&1 &
+          kubectl -n "$NS" port-forward svc/order-service-w10-aks 18001:8000 >/dev/null 2>&1 &
           PFPID2=$!
-          kubectl -n $STAGING_NAMESPACE port-forward svc/customer-service-w10-aks 18002:8000 >/dev/null 2>&1 &
+          kubectl -n "$NS" port-forward svc/customer-service-w10-aks 18002:8000 >/dev/null 2>&1 &
           PFPID3=$!
           # give port-forwards time to bind
           sleep 5
@@ -84,10 +132,11 @@ jobs:
 
       - name: Basic smoke (pods up)
         run: |
-          kubectl -n $STAGING_NAMESPACE get pods
-          kubectl -n $STAGING_NAMESPACE get svc
+          NS="${{ steps.meta.outputs.NS }}"
+          kubectl -n "$NS" get pods
+          kubectl -n "$NS" get svc
 
       - name: Destroy staging environment
         if: always()
         run: |
-          kubectl delete ns $STAGING_NAMESPACE --wait=false
+          kubectl delete ns "${{ steps.meta.outputs.NS }}" --wait=false
