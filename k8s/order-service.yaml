@@ -16,6 +16,8 @@ spec:
       labels:
         app: order-service
     spec:
+      imagePullSecrets:
+      - name: acr-cred
       containers:
       - name: order-service-container
         image: ahmadweek10.azurecr.io/order_service:v1

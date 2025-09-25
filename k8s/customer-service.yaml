@@ -16,6 +16,8 @@ spec:
       labels:
         app: customer-service
     spec:
+      imagePullSecrets:
+      - name: acr-cred
       containers:
       - name: customer-service-container
         image: ahmadweek10.azurecr.io/customer_service:v1

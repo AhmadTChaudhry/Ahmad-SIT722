@@ -16,6 +16,8 @@ spec:
       labels:
         app: product-service
     spec:
+      imagePullSecrets:
+      - name: acr-cred
       containers:
       - name: product-service-container
         image: ahmadweek10.azurecr.io/product_service:v1

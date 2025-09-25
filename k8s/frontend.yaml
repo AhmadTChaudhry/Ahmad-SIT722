@@ -16,6 +16,8 @@ spec:
       labels:
         app: frontend
     spec:
+      imagePullSecrets:
+      - name: acr-cred
       containers:
       - name: frontend-container
         image: ahmadweek10.azurecr.io/frontend:v1
