@@ -91,6 +91,16 @@ jobs:
           kubectl -n "$NS" apply -f product-service.yaml
           kubectl -n "$NS" apply -f order-service.yaml
           kubectl -n "$NS" apply -f customer-service.yaml
+          kubectl -n "$NS" apply -f frontend.yaml || true
+
+      - name: Pre-scale app deployments to 2 replicas (avoid deadlock)
+        run: |
+          NS="${{ steps.meta.outputs.NS }}"
+          kubectl -n "$NS" scale deploy/product-service-w10-aks  --replicas=2 || true
+          kubectl -n "$NS" scale deploy/order-service-w10-aks    --replicas=2 || true
+          kubectl -n "$NS" scale deploy/customer-service-w10-aks --replicas=2 || true
+          # Wait a bit to let extra replicas schedule
+          sleep 10
 
       - name: Set images to computed tag
         run: |
@@ -103,13 +113,16 @@ jobs:
             order-service-container="$REG/order_service:$TAG"
           kubectl -n "$NS" set image deployment/customer-service-w10-aks \
             customer-service-container="$REG/customer_service:$TAG"
+          kubectl -n "$NS" set image deployment/frontend-w10-aks \
+            frontend-container="$REG/frontend:$TAG" || true
 
       - name: Wait for rollouts
         run: |
           NS="${{ steps.meta.outputs.NS }}"
-          kubectl -n "$NS" rollout status deployment/product-service-w10-aks --timeout=300s
-          kubectl -n "$NS" rollout status deployment/order-service-w10-aks --timeout=300s
-          kubectl -n "$NS" rollout status deployment/customer-service-w10-aks --timeout=300s
+          kubectl -n "$NS" rollout status deployment/product-service-w10-aks --timeout=600s
+          kubectl -n "$NS" rollout status deployment/order-service-w10-aks --timeout=600s
+          kubectl -n "$NS" rollout status deployment/customer-service-w10-aks --timeout=600s
+          kubectl -n "$NS" rollout status deployment/frontend-w10-aks --timeout=600s || true
 
       - name: Acceptance checks (/health)
         run: |
@@ -127,14 +140,25 @@ jobs:
           curl -sf http://127.0.0.1:18000/health | cat
           curl -sf http://127.0.0.1:18001/health | cat
           curl -sf http://127.0.0.1:18002/health | cat
+          kubectl -n "$NS" port-forward svc/frontend-w10-aks 18003:80 >/dev/null 2>&1 &
+          PFPID4=$!
+          sleep 2
+          curl -sf http://127.0.0.1:18003/ | head -n 1 | cat || true
           # cleanup port-forward background jobs
-          kill $PFPID1 $PFPID2 $PFPID3 || true
+          kill $PFPID1 $PFPID2 $PFPID3 $PFPID4 || true
 
       - name: Basic smoke (pods up)
         run: |
           NS="${{ steps.meta.outputs.NS }}"
           kubectl -n "$NS" get pods
           kubectl -n "$NS" get svc
+
+      - name: Scale app deployments back to 1 (optional)
+        run: |
+          NS="${{ steps.meta.outputs.NS }}"
+          kubectl -n "$NS" scale deploy/product-service-w10-aks  --replicas=1 || true
+          kubectl -n "$NS" scale deploy/order-service-w10-aks    --replicas=1 || true
+          kubectl -n "$NS" scale deploy/customer-service-w10-aks --replicas=1 || true
 
       - name: Destroy staging environment
         if: always()

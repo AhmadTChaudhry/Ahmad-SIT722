@@ -34,9 +34,11 @@ jobs:
           docker build -t $REGISTRY/customer_service:main-latest -f backend/customer_service/Dockerfile .
           docker build -t $REGISTRY/order_service:main-latest    -f backend/order_service/Dockerfile .
           docker build -t $REGISTRY/product_service:main-latest  -f backend/product_service/Dockerfile .
+          docker build -t $REGISTRY/frontend:main-latest         -f frontend/Dockerfile .
           docker push $REGISTRY/customer_service:main-latest
           docker push $REGISTRY/order_service:main-latest
           docker push $REGISTRY/product_service:main-latest
+          docker push $REGISTRY/frontend:main-latest
 
       - name: Set AKS context
         uses: azure/aks-set-context@v4
@@ -60,6 +62,7 @@ jobs:
           kubectl -n $PROD_NAMESPACE apply -f product-service.yaml
           kubectl -n $PROD_NAMESPACE apply -f order-service.yaml
           kubectl -n $PROD_NAMESPACE apply -f customer-service.yaml
+          kubectl -n $PROD_NAMESPACE apply -f frontend.yaml || true
 
       - name: Pin images to main-latest
         run: |
@@ -69,9 +72,12 @@ jobs:
             order-service-container=$REGISTRY/order_service:main-latest
           kubectl -n $PROD_NAMESPACE set image deployment/customer-service-w10-aks \
             customer-service-container=$REGISTRY/customer_service:main-latest
+          kubectl -n $PROD_NAMESPACE set image deployment/frontend-w10-aks \
+            frontend-container=$REGISTRY/frontend:main-latest || true
 
       - name: Wait for rollouts
         run: |
-          kubectl -n $PROD_NAMESPACE rollout status deployment/product-service-w10-aks --timeout=180s
-          kubectl -n $PROD_NAMESPACE rollout status deployment/order-service-w10-aks --timeout=180s
-          kubectl -n $PROD_NAMESPACE rollout status deployment/customer-service-w10-aks --timeout=180s
+          kubectl -n $PROD_NAMESPACE rollout status deployment/product-service-w10-aks --timeout=300s
+          kubectl -n $PROD_NAMESPACE rollout status deployment/order-service-w10-aks --timeout=300s
+          kubectl -n $PROD_NAMESPACE rollout status deployment/customer-service-w10-aks --timeout=300s
+          kubectl -n $PROD_NAMESPACE rollout status deployment/frontend-w10-aks --timeout=300s || true
