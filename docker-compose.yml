@@ -116,6 +116,7 @@ services:
     environment:
       POSTGRES_HOST: order_db # Connects to the 'order_db' service within Docker network
       CUSTOMER_SERVICE_URL: http://customer_service:8000 # Internal Docker network URL for Customer Service
+      PRODUCT_SERVICE_URL: http://product_service:8000 # Internal Docker network URL for Product Service
       RABBITMQ_HOST: rabbitmq # Internal Docker network hostname for RabbitMQ
       RABBITMQ_PORT: 5672
       RABBITMQ_USER: guest
