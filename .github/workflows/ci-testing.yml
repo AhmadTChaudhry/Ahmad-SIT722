@@ -1,0 +1,68 @@
+name: CI (testing branch)
+on:
+  push:
+    branches: [ "testing" ]
+
+env:
+  REGISTRY: ${{ secrets.ACR_LOGIN_SERVER }}
+  IMAGE_TAG: ${{ github.sha }}
+
+jobs:
+  test-build-push:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install test deps and run tests (customer)
+        working-directory: backend/customer_service
+        run: |
+          pip install -r requirements-dev.txt
+          pytest -q
+
+      - name: Install test deps and run tests (order)
+        working-directory: backend/order_service
+        run: |
+          pip install -r requirements-dev.txt
+          pytest -q
+
+      - name: Install test deps and run tests (product)
+        working-directory: backend/product_service
+        run: |
+          pip install -r requirements-dev.txt
+          pytest -q
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Docker login to ACR
+        uses: azure/docker-login@v2
+        with:
+          login-server: ${{ secrets.ACR_LOGIN_SERVER }}
+          username: ${{ fromJson(secrets.AZURE_CREDENTIALS).clientId }}
+          password: ${{ fromJson(secrets.AZURE_CREDENTIALS).clientSecret }}
+
+      - name: Build and push images
+        run: |
+          docker build -t $REGISTRY/customer_service:${IMAGE_TAG} -f backend/customer_service/Dockerfile .
+          docker build -t $REGISTRY/order_service:${IMAGE_TAG}    -f backend/order_service/Dockerfile .
+          docker build -t $REGISTRY/product_service:${IMAGE_TAG}  -f backend/product_service/Dockerfile .
+          docker push $REGISTRY/customer_service:${IMAGE_TAG}
+          docker push $REGISTRY/order_service:${IMAGE_TAG}
+          docker push $REGISTRY/product_service:${IMAGE_TAG}
+
+      - name: Also tag as testing-latest
+        run: |
+          for img in customer_service order_service product_service; do
+            docker tag $REGISTRY/$img:${IMAGE_TAG} $REGISTRY/$img:testing-latest
+            docker push $REGISTRY/$img:testing-latest
+          done
