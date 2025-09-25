@@ -130,10 +130,10 @@ jobs:
       - name: Wait for rollouts
         run: |
           NS="${{ steps.meta.outputs.NS }}"
-          kubectl -n "$NS" rollout status deployment/product-service-w10-aks --timeout=300s
-          kubectl -n "$NS" rollout status deployment/order-service-w10-aks --timeout=300s
-          kubectl -n "$NS" rollout status deployment/customer-service-w10-aks --timeout=300s
-          kubectl -n "$NS" rollout status deployment/frontend-w10-aks --timeout=300s || true
+          kubectl -n "$NS" rollout status deployment/product-service-w10-aks --timeout=600s
+          kubectl -n "$NS" rollout status deployment/order-service-w10-aks --timeout=600s
+          kubectl -n "$NS" rollout status deployment/customer-service-w10-aks --timeout=600s
+          kubectl -n "$NS" rollout status deployment/frontend-w10-aks --timeout=600s || true
 
       - name: Acceptance checks (/health)
         run: |
