@@ -7,8 +7,8 @@ on:
 
 env:
   REGISTRY: ${{ secrets.ACR_LOGIN_SERVER }}
-  # Ephemeral namespace per run (safe for concurrent runs)
-  STAGING_NAMESPACE: staging-${{ github.run_id }}-${{ github.run_attempt }}
+  # Use repository variable for staging namespace (e.g., staging-w10)
+  STAGING_NAMESPACE: ${{ vars.STAGING_NAMESPACE }}
 
 jobs:
   deploy-staging:
@@ -34,7 +34,7 @@ jobs:
 
       - name: Create staging namespace
         run: |
-          kubectl create ns $STAGING_NAMESPACE
+          kubectl get ns $STAGING_NAMESPACE || kubectl create ns $STAGING_NAMESPACE
 
       - name: Apply k8s manifests to staging
         working-directory: k8s
