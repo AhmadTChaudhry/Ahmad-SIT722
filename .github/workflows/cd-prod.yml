@@ -98,3 +98,34 @@ jobs:
           kubectl -n $PROD_NAMESPACE rollout status deployment/order-service-w10-aks --timeout=600s
           kubectl -n $PROD_NAMESPACE rollout status deployment/customer-service-w10-aks --timeout=600s
           kubectl -n $PROD_NAMESPACE rollout status deployment/frontend-w10-aks --timeout=600s || true
+
+      - name: Diagnostics on failure (describe, events, logs)
+        if: failure()
+        run: |
+          set +e
+          echo "== Pods =="
+          kubectl -n $PROD_NAMESPACE get pods -o wide | cat
+          echo "== ReplicaSets =="
+          kubectl -n $PROD_NAMESPACE get rs | cat
+          echo "== Events (last 200) =="
+          kubectl -n $PROD_NAMESPACE get events --sort-by=.lastTimestamp | tail -n 200 | cat
+          echo "== Describe product-service pods =="
+          for p in $(kubectl -n $PROD_NAMESPACE get pods -l app=product-service -o name); do
+            kubectl -n $PROD_NAMESPACE describe $p | sed -n '1,200p' | cat
+            kubectl -n $PROD_NAMESPACE logs $p --all-containers --tail=200 | cat || true
+          done
+          echo "== Describe order-service pods =="
+          for p in $(kubectl -n $PROD_NAMESPACE get pods -l app=order-service -o name); do
+            kubectl -n $PROD_NAMESPACE describe $p | sed -n '1,200p' | cat
+            kubectl -n $PROD_NAMESPACE logs $p --all-containers --tail=200 | cat || true
+          done
+          echo "== Describe customer-service pods =="
+          for p in $(kubectl -n $PROD_NAMESPACE get pods -l app=customer-service -o name); do
+            kubectl -n $PROD_NAMESPACE describe $p | sed -n '1,200p' | cat
+            kubectl -n $PROD_NAMESPACE logs $p --all-containers --tail=200 | cat || true
+          done
+          echo "== Describe frontend pods =="
+          for p in $(kubectl -n $PROD_NAMESPACE get pods -l app=frontend -o name); do
+            kubectl -n $PROD_NAMESPACE describe $p | sed -n '1,200p' | cat
+            kubectl -n $PROD_NAMESPACE logs $p --all-containers --tail=200 | cat || true
+          done
