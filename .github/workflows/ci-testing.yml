@@ -10,6 +10,19 @@ env:
 jobs:
   test-build-push:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres" 
+          --health-interval 5s 
+          --health-timeout 5s 
+          --health-retries 20
     permissions:
       id-token: write
       contents: read
@@ -21,20 +34,47 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Wait for Postgres and create databases
+        env:
+          PGPASSWORD: postgres
+        run: |
+          sudo apt-get update -y && sudo apt-get install -y postgresql-client | cat
+          for i in {1..30}; do
+            pg_isready -h localhost -p 5432 -U postgres && break || sleep 2
+          done
+          createdb -h localhost -p 5432 -U postgres customers || true
+          createdb -h localhost -p 5432 -U postgres orders || true
+          createdb -h localhost -p 5432 -U postgres products || true
+
       - name: Install test deps and run tests (customer)
         working-directory: backend/customer_service
+        env:
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: "5432"
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
         run: |
           pip install -r requirements-dev.txt
           pytest -q
 
       - name: Install test deps and run tests (order)
         working-directory: backend/order_service
+        env:
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: "5432"
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
         run: |
           pip install -r requirements-dev.txt
           pytest -q
 
       - name: Install test deps and run tests (product)
         working-directory: backend/product_service
+        env:
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: "5432"
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
         run: |
           pip install -r requirements-dev.txt
           pytest -q
