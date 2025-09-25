@@ -1,0 +1,77 @@
+name: CD to Production (main)
+on:
+  push:
+    branches: [ "main" ]
+
+env:
+  REGISTRY: ${{ secrets.ACR_LOGIN_SERVER }}
+  PROD_NAMESPACE: ${{ vars.PROD_NAMESPACE }}
+
+jobs:
+  build-and-deploy-prod:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Docker login to ACR
+        uses: azure/docker-login@v2
+        with:
+          login-server: ${{ secrets.ACR_LOGIN_SERVER }}
+          username: ${{ fromJson(secrets.AZURE_CREDENTIALS).clientId }}
+          password: ${{ fromJson(secrets.AZURE_CREDENTIALS).clientSecret }}
+
+      - name: Build and push main images
+        run: |
+          docker build -t $REGISTRY/customer_service:main-latest -f backend/customer_service/Dockerfile .
+          docker build -t $REGISTRY/order_service:main-latest    -f backend/order_service/Dockerfile .
+          docker build -t $REGISTRY/product_service:main-latest  -f backend/product_service/Dockerfile .
+          docker push $REGISTRY/customer_service:main-latest
+          docker push $REGISTRY/order_service:main-latest
+          docker push $REGISTRY/product_service:main-latest
+
+      - name: Set AKS context
+        uses: azure/aks-set-context@v4
+        with:
+          resource-group: ${{ vars.AKS_RESOURCE_GROUP }}
+          cluster-name: ${{ vars.AKS_CLUSTER_NAME }}
+
+      - name: Create prod namespace if needed
+        run: |
+          kubectl get ns $PROD_NAMESPACE || kubectl create ns $PROD_NAMESPACE
+
+      - name: Apply manifests to prod
+        working-directory: k8s
+        run: |
+          kubectl -n $PROD_NAMESPACE apply -f configmaps.yaml
+          kubectl -n $PROD_NAMESPACE apply -f secrets.yaml
+          kubectl -n $PROD_NAMESPACE apply -f rabbitmq.yaml
+          kubectl -n $PROD_NAMESPACE apply -f product-db.yaml
+          kubectl -n $PROD_NAMESPACE apply -f order-db.yaml
+          kubectl -n $PROD_NAMESPACE apply -f customer-db.yaml
+          kubectl -n $PROD_NAMESPACE apply -f product-service.yaml
+          kubectl -n $PROD_NAMESPACE apply -f order-service.yaml
+          kubectl -n $PROD_NAMESPACE apply -f customer-service.yaml
+
+      - name: Pin images to main-latest
+        run: |
+          kubectl -n $PROD_NAMESPACE set image deployment/product-service-w10-aks \
+            product-service-container=$REGISTRY/product_service:main-latest
+          kubectl -n $PROD_NAMESPACE set image deployment/order-service-w10-aks \
+            order-service-container=$REGISTRY/order_service:main-latest
+          kubectl -n $PROD_NAMESPACE set image deployment/customer-service-w10-aks \
+            customer-service-container=$REGISTRY/customer_service:main-latest
+
+      - name: Wait for rollouts
+        run: |
+          kubectl -n $PROD_NAMESPACE rollout status deployment/product-service-w10-aks --timeout=180s
+          kubectl -n $PROD_NAMESPACE rollout status deployment/order-service-w10-aks --timeout=180s
+          kubectl -n $PROD_NAMESPACE rollout status deployment/customer-service-w10-aks --timeout=180s

@@ -1,0 +1,74 @@
+name: CD to Staging (after CI on testing)
+on:
+  workflow_run:
+    workflows: [ "CI (testing branch)" ]
+    types: [ "completed" ]
+    branches: [ "testing" ]
+
+env:
+  REGISTRY: ${{ secrets.ACR_LOGIN_SERVER }}
+  STAGING_NAMESPACE: ${{ vars.STAGING_NAMESPACE }}
+
+jobs:
+  deploy-staging:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Set AKS context
+        uses: azure/aks-set-context@v4
+        with:
+          resource-group: ${{ vars.AKS_RESOURCE_GROUP }}
+          cluster-name: ${{ vars.AKS_CLUSTER_NAME }}
+
+      - name: Create staging namespace
+        run: |
+          kubectl get ns $STAGING_NAMESPACE || kubectl create ns $STAGING_NAMESPACE
+
+      - name: Apply k8s manifests to staging
+        working-directory: k8s
+        run: |
+          kubectl -n $STAGING_NAMESPACE apply -f configmaps.yaml
+          kubectl -n $STAGING_NAMESPACE apply -f secrets.yaml
+          kubectl -n $STAGING_NAMESPACE apply -f rabbitmq.yaml
+          kubectl -n $STAGING_NAMESPACE apply -f product-db.yaml
+          kubectl -n $STAGING_NAMESPACE apply -f order-db.yaml
+          kubectl -n $STAGING_NAMESPACE apply -f customer-db.yaml
+          kubectl -n $STAGING_NAMESPACE apply -f product-service.yaml
+          kubectl -n $STAGING_NAMESPACE apply -f order-service.yaml
+          kubectl -n $STAGING_NAMESPACE apply -f customer-service.yaml
+
+      - name: Override images to use testing-latest
+        run: |
+          kubectl -n $STAGING_NAMESPACE set image deployment/product-service-w10-aks \
+            product-service-container=$REGISTRY/product_service:testing-latest
+          kubectl -n $STAGING_NAMESPACE set image deployment/order-service-w10-aks \
+            order-service-container=$REGISTRY/order_service:testing-latest
+          kubectl -n $STAGING_NAMESPACE set image deployment/customer-service-w10-aks \
+            customer-service-container=$REGISTRY/customer_service:testing-latest
+
+      - name: Wait for rollouts
+        run: |
+          kubectl -n $STAGING_NAMESPACE rollout status deployment/product-service-w10-aks --timeout=180s
+          kubectl -n $STAGING_NAMESPACE rollout status deployment/order-service-w10-aks --timeout=180s
+          kubectl -n $STAGING_NAMESPACE rollout status deployment/customer-service-w10-aks --timeout=180s
+
+      - name: Basic smoke (pods up)
+        run: |
+          kubectl -n $STAGING_NAMESPACE get pods
+          kubectl -n $STAGING_NAMESPACE get svc
+
+      - name: Destroy staging environment
+        if: always()
+        run: |
+          kubectl delete ns $STAGING_NAMESPACE --wait=false
