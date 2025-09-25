@@ -1,9 +1,7 @@
 name: CD to Staging (after CI on testing)
 on:
   workflow_run:
-    workflows: [ "CI - Stage 1 (testing branch) - test then build & push images" ]
     types: [ "completed" ]
-    branches: [ "testing" ]
 
 env:
   REGISTRY: ${{ secrets.ACR_LOGIN_SERVER }}
@@ -12,7 +10,10 @@ env:
 
 jobs:
   deploy-staging:
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    if: >-
+      ${{ github.event.workflow_run.conclusion == 'success' &&
+          github.event.workflow_run.name == 'CI - Stage 1 (testing branch) - test then build & push images' &&
+          github.event.workflow_run.head_branch == 'testing' }}
     runs-on: ubuntu-latest
     permissions:
       id-token: write
