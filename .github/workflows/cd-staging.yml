@@ -1,7 +1,7 @@
 name: CD - Stage 2 (Staging)
 on:
   workflow_run:
-    workflows: [ "CI - Stage 1 (testing branch)" ]
+    workflows: [ "CI - Stage 1 (Testing)" ]
     types: [ "completed" ]
     branches: [ "testing" ]
   workflow_dispatch:
@@ -24,6 +24,7 @@ concurrency:
 
 jobs:
   deploy-staging:
+    name: Deploy Staging
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
     permissions:
@@ -33,7 +34,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Compute image TAG and Namespace
+      - name: Compute Image Tag and Namespace
         id: meta
         shell: bash
         run: |
@@ -62,23 +63,23 @@ jobs:
           echo "REG=${{ env.REGISTRY }}" >> "$GITHUB_OUTPUT"
           echo "Using REG=${{ env.REGISTRY }}, TAG=$TAG, NS=$NS"
 
-      - name: Azure login
+      - name: Azure Login
         uses: azure/login@v2
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Set AKS context
+      - name: Set AKS Context
         uses: azure/aks-set-context@v4
         with:
           resource-group: ${{ vars.AKS_RESOURCE_GROUP }}
           cluster-name: ${{ vars.AKS_CLUSTER_NAME }}
 
-      - name: Create staging namespace
+      - name: Create Staging Namespace
         run: |
           NS="${{ steps.meta.outputs.NS }}"
           kubectl get ns "$NS" >/dev/null 2>&1 || kubectl create ns "$NS"
 
-      - name: Create ACR imagePullSecret in namespace
+      - name: Create ACR imagePullSecret in Namespace
         env:
           REG: ${{ steps.meta.outputs.REG }}
           NS: ${{ steps.meta.outputs.NS }}
@@ -92,13 +93,13 @@ jobs:
             --docker-email="devnull@example.com" \
             --dry-run=client -o yaml | kubectl apply -f -
 
-      - name: Patch default ServiceAccount to use imagePullSecret
+      - name: Patch ServiceAccount to use imagePullSecret
         env:
           NS: ${{ steps.meta.outputs.NS }}
         run: |
           kubectl -n "$NS" patch serviceaccount default -p '{"imagePullSecrets":[{"name":"acr-cred"}]}' || true
 
-      - name: Apply k8s manifests to staging
+      - name: Apply k8s Manifests to Staging
         working-directory: k8s
         run: |
           NS="${{ steps.meta.outputs.NS }}"
@@ -113,7 +114,7 @@ jobs:
           kubectl -n "$NS" apply -f customer-service.yaml
           kubectl -n "$NS" apply -f frontend.yaml || true
 
-      - name: Set images to computed tag
+      - name: Set Images to Computed Tag
         run: |
           NS="${{ steps.meta.outputs.NS }}"
           REG="${{ steps.meta.outputs.REG }}"
@@ -127,7 +128,7 @@ jobs:
           kubectl -n "$NS" set image deployment/frontend-w10-aks \
             frontend-container="$REG/frontend:$TAG" || true
 
-      - name: Wait for rollouts
+      - name: Wait for Rollouts
         run: |
           NS="${{ steps.meta.outputs.NS }}"
           kubectl -n "$NS" rollout status deployment/product-service-w10-aks --timeout=600s
@@ -135,7 +136,7 @@ jobs:
           kubectl -n "$NS" rollout status deployment/customer-service-w10-aks --timeout=600s
           kubectl -n "$NS" rollout status deployment/frontend-w10-aks --timeout=600s || true
 
-      - name: Acceptance checks (/health)
+      - name: Acceptance Checks (/health)
         run: |
           set -e
           NS="${{ steps.meta.outputs.NS }}"
@@ -158,13 +159,13 @@ jobs:
           # cleanup port-forward background jobs
           kill $PFPID1 $PFPID2 $PFPID3 $PFPID4 || true
 
-      - name: Basic smoke (pods up)
+      - name: Basic Smoke (Pods Up)
         run: |
           NS="${{ steps.meta.outputs.NS }}"
           kubectl -n "$NS" get pods
           kubectl -n "$NS" get svc
 
-      - name: Destroy staging environment
+      - name: Destroy Staging Environment
         if: always()
         run: |
           kubectl delete ns "${{ steps.meta.outputs.NS }}" --wait=false

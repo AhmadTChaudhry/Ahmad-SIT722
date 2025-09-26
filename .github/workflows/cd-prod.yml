@@ -9,6 +9,7 @@ env:
 
 jobs:
   build-and-deploy-prod:
+    name: Build and Deploy to Production
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -17,19 +18,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Azure login
+      - name: Azure Login
         uses: azure/login@v2
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Docker login to ACR
+      - name: Docker Login to ACR
         uses: azure/docker-login@v2
         with:
           login-server: ${{ secrets.ACR_LOGIN_SERVER }}
           username: ${{ fromJson(secrets.AZURE_CREDENTIALS).clientId }}
           password: ${{ fromJson(secrets.AZURE_CREDENTIALS).clientSecret }}
 
-      - name: Build and push main images
+      - name: Build and Push Main Images
         run: |
           docker build -t $REGISTRY/customer_service:main-latest ./backend/customer_service
           docker build -t $REGISTRY/order_service:main-latest    ./backend/order_service
@@ -40,17 +41,17 @@ jobs:
           docker push $REGISTRY/product_service:main-latest
           docker push $REGISTRY/frontend:main-latest
 
-      - name: Set AKS context
+      - name: Set AKS Context
         uses: azure/aks-set-context@v4
         with:
           resource-group: ${{ vars.AKS_RESOURCE_GROUP }}
           cluster-name: ${{ vars.AKS_CLUSTER_NAME }}
 
-      - name: Create prod namespace if needed
+      - name: Create Prod Namespace if Needed
         run: |
           kubectl get ns $PROD_NAMESPACE || kubectl create ns $PROD_NAMESPACE
 
-      - name: Create ACR imagePullSecret in prod namespace
+      - name: Create ACR imagePullSecret in Prod Namespace
         env:
           REG: ${{ env.REGISTRY }}
           SP_APP_ID: ${{ fromJson(secrets.AZURE_CREDENTIALS).clientId }}
@@ -63,11 +64,11 @@ jobs:
             --docker-email="devnull@example.com" \
             --dry-run=client -o yaml | kubectl apply -f -
 
-      - name: Patch default ServiceAccount in prod to use imagePullSecret
+      - name: Patch ServiceAccount in Prod to use imagePullSecret
         run: |
           kubectl -n "$PROD_NAMESPACE" patch serviceaccount default -p '{"imagePullSecrets":[{"name":"acr-cred"}]}' || true
 
-      - name: Apply manifests to prod
+      - name: Apply Manifests to Prod
         working-directory: k8s
         run: |
           kubectl -n $PROD_NAMESPACE apply -f configmaps.yaml
@@ -81,7 +82,7 @@ jobs:
           kubectl -n $PROD_NAMESPACE apply -f customer-service.yaml
           kubectl -n $PROD_NAMESPACE apply -f frontend.yaml || true
 
-      - name: Pin images to main-latest
+      - name: Pin Images to main-latest
         run: |
           kubectl -n $PROD_NAMESPACE set image deployment/product-service-w10-aks \
             product-service-container=$REGISTRY/product_service:main-latest
@@ -92,14 +93,14 @@ jobs:
           kubectl -n $PROD_NAMESPACE set image deployment/frontend-w10-aks \
             frontend-container=$REGISTRY/frontend:main-latest || true
 
-      - name: Wait for rollouts
+      - name: Wait for Rollouts
         run: |
           kubectl -n $PROD_NAMESPACE rollout status deployment/product-service-w10-aks --timeout=600s
           kubectl -n $PROD_NAMESPACE rollout status deployment/order-service-w10-aks --timeout=600s
           kubectl -n $PROD_NAMESPACE rollout status deployment/customer-service-w10-aks --timeout=600s
           kubectl -n $PROD_NAMESPACE rollout status deployment/frontend-w10-aks --timeout=600s || true
 
-      - name: Diagnostics on failure (describe, events, logs)
+      - name: Diagnostics on Failure (describe, events, logs)
         if: failure()
         run: |
           set +e

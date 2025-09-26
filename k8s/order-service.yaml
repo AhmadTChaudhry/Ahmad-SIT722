@@ -68,7 +68,7 @@ spec:
               name: ecomm-config-w10-aks
               key: CUSTOMER_SERVICE_URL
 ---
-apiVersion: v1
+apiVersion: v1    
 kind: Service
 metadata:
   name: order-service-w10-aks
@@ -81,4 +81,4 @@ spec:
     - protocol: TCP
       port: 8001
       targetPort: 8000
-  type: LoadBalancer
+  type: ClusterIP
